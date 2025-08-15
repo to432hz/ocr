@@ -120,46 +120,55 @@
     });
 
     // ========= OCR and add =========
-    els.btnOCR.onclick = async () => {
-      const files = Array.from(els.imgIn.files || []);
-      if (!files.length) return alert('이미지를 선택해줘!');
-      const lang = els.lang.value || 'eng+kor';
-      els.ocrStatus.textContent = '모델 로딩 중… (최초 1회는 수 MB 다운로드)';
-      try{
-        const worker = await Tesseract.createWorker(lang, 1, {
-          logger: m => {
-            if (m.status === 'recognizing text') {
-              els.ocrStatus.textContent = `인식 중… ${Math.round(m.progress*100)}%`;
-            } else if (m.status) {
-              els.ocrStatus.textContent = (m.status || '').replace(/_/g,' ') + (m.progress? ` ${Math.round(m.progress*100)}%` : '');
-            }
-          }
-        });
+   <script>
+els.btnOCR.onclick = async () => {
+  const files = Array.from(els.imgIn.files || []);
+  if (!files.length) return alert('이미지를 선택해줘!');
+  const lang = (els.lang?.value || 'kor'); // 한글이면 kor 권장
+  els.ocrStatus.textContent = '모델 로딩 중… (최초 1회는 수 MB 다운로드)';
 
-        let fullText = '';
-        for (const f of files) {
-          const { data: { text } } = await worker.recognize(f);
-          fullText += (fullText ? '\n\n' : '') + (text||'').trim();
+  try{
+    const worker = await Tesseract.createWorker(lang, 1, {
+      logger: m => {
+        if (m.status) {
+          const p = m.progress ? ` ${Math.round(m.progress*100)}%` : '';
+          els.ocrStatus.textContent = m.status.replace(/_/g,' ') + p;
         }
-        await worker.terminate();
-        els.ocrStatus.textContent = '추출 완료!';
-
-        const title = (els.title.value || '').trim() || firstLine(fullText) || '무제 OCR';
-        const tags = (els.tags.value || '').split(',').map(s=>s.trim()).filter(Boolean);
-
-        const item = { id: uid(), title, tags, note: (els.note.value||'').trim(), ocr: fullText, createdAt: now() };
-        items = [item, ...items];
-        save(items);
-
-        // reset inputs
-        els.title.value=''; els.tags.value=''; els.note.value=''; els.imgIn.value=''; els.thumbs.innerHTML='';
-        render();
-      }catch(err){
-        console.error(err);
-        alert('OCR 실패: ' + err.message);
-        els.ocrStatus.textContent = '에러';
       }
-    };
+    });
+    // 파라미터: 한 블록의 문단(PSM 6), DPI 300, 공백 보존
+    await worker.setParameters({
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK, // = 6
+      user_defined_dpi: '300',
+      preserve_interword_spaces: '1'
+    });
+
+    let fullText = '';
+    for (const f of files) {
+      const bmp = await fileToBitmap(f);
+      const pre = preprocessBitmap(bmp, { scale: 1.9, threshold: 170, contrast: 1.3 }); // 필요시 숫자 조정
+      const { data:{ text } } = await worker.recognize(pre);
+      fullText += (fullText ? '\n\n' : '') + (text||'').trim();
+    }
+    await worker.terminate();
+    els.ocrStatus.textContent = '추출 완료!';
+
+    const title = (els.title.value || '').trim() || firstLine(fullText) || '무제 OCR';
+    const tags = (els.tags.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+    const item = { id: uid(), title, tags, note: (els.note.value||'').trim(), ocr: fullText, createdAt: now() };
+    items = [item, ...items];
+    save(items);
+    // reset
+    els.title.value=''; els.tags.value=''; els.note.value=''; els.imgIn.value=''; els.thumbs.innerHTML='';
+    render();
+  }catch(err){
+    console.error(err);
+    alert('OCR 실패: ' + err.message);
+    els.ocrStatus.textContent = '에러';
+  }
+};
+</script>
+
 
     // ========= render & search =========
     function render(){
